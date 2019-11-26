@@ -7,6 +7,7 @@ warnings.simplefilter('ignore')
 train_columns = None
 test_columns  = None
 
+# Kaggleの処理時間削減のためのオープンソースコード
 def reduce_mem_usage(props):
     start_mem_usg = props.memory_usage().sum() / 1024**2 
     #print("Memory usage of properties dataframe is :",start_mem_usg," MB")
@@ -131,48 +132,41 @@ Tmptest_df = sample_test_df
 Tmptest_df, NAlist = reduce_mem_usage(Tmptest_df)
 Tmptest = pd.get_dummies(Tmptest_df,drop_first=True,dummy_na=True)
 print(Tmptest.shape)
+
+# 学習データを分割
 for i in range(50):
+    # データ読み込み
     train_df = next(train_gen)
     train_df.columns = train_columns
     train_df, NAlist = reduce_mem_usage(train_df)
-    #print("_________________")
-    #print("")
-    #print("Warning: the following columns have missing values filled with 'df['column_name'].min() -1': ")
-    #print("_________________")
-    #print("")
-    #print(NAlist)
-    print("read Ok")
+    
+    # ダミー変数化
     train = pd.get_dummies(train_df,drop_first=True,dummy_na=True)
     train = train.drop('purchase',axis = 1)
     print(train.shape)
-    #print("Fill Now ")
-    #fill_missing_columns(train,Tmptest)
-    #print(train.shape)
     
+    #ロジスティック回帰
     X = train
     y = train_df.purchase
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3,random_state=42)
-    #logreg.fit(X_train, y_train.to_numpy().astype(np.float))
     logreg.fit(X_train, y_train)
-    Adjust = train
     print(logreg.score(X_test, y_test))
     
     
 print("Learning Complete")
+# テストデータも分割して評価
 for a in range(10):
     test_df = next(test_gen)
-    #test_df = pd.DataFrame(test_df)
     test_df.columns = test_columns
     test_df, NAlist = reduce_mem_usage(test_df)
     test = pd.get_dummies(test_df,drop_first=True,dummy_na=True)
-    #fill_missing_columns(train,test)
-    #print(Adjust.shape)
-    print(test.shape)
-    proba = logreg.predict_proba(test)[:, 1]
+   
+   #購入確率をここで挿入
+   proba = logreg.predict_proba(test)[:, 1]
     sample_test_df['purchase_id'].extend(test['purchase_id'])
     sample_test_df['Probablity'].extend(proba)
     print("Complete")
 
-# 提出料
+# 提出
 submit_df = sample_test_df[['purchase_id', 'probability']]
 submit_df.to_csv('Desktop/AIQuest/submit_191125.csv', header=False, index=False, )
