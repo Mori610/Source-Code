@@ -1,0 +1,178 @@
+import pandas as pd
+import numpy as np
+import warnings
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+warnings.simplefilter('ignore')
+train_columns = None
+test_columns  = None
+
+def reduce_mem_usage(props):
+    start_mem_usg = props.memory_usage().sum() / 1024**2 
+    #print("Memory usage of properties dataframe is :",start_mem_usg," MB")
+    NAlist = [] # Keeps track of columns that have missing values filled in. 
+    for col in props.columns:
+        if props[col].dtype != object:  # Exclude strings
+            
+            # Print current column type
+            #print("******************************")
+            #print("Column: ",col)
+            #print("dtype before: ",props[col].dtype)
+            
+            # make variables for Int, max and min
+            IsInt = False
+            mx = props[col].max()
+            mn = props[col].min()
+            
+            # Integer does not support NA, therefore, NA needs to be filled
+            if not np.isfinite(props[col]).all(): 
+                NAlist.append(col)
+                props[col].fillna(mn-1,inplace=True)  
+                   
+            # test if column can be converted to an integer
+            asint = props[col].fillna(0).astype(np.int64)
+            result = (props[col] - asint)
+            result = result.sum()
+            if result > -0.01 and result < 0.01:
+                IsInt = True
+
+            
+            # Make Integer/unsigned Integer datatypes
+            if IsInt:
+                if mn >= 0:
+                    if mx < 255:
+                        props[col] = props[col].astype(np.uint8)
+                    elif mx < 65535:
+                        props[col] = props[col].astype(np.uint16)
+                    elif mx < 4294967295:
+                        props[col] = props[col].astype(np.uint32)
+                    else:
+                        props[col] = props[col].astype(np.uint64)
+                else:
+                    if mn > np.iinfo(np.int8).min and mx < np.iinfo(np.int8).max:
+                        props[col] = props[col].astype(np.int8)
+                    elif mn > np.iinfo(np.int16).min and mx < np.iinfo(np.int16).max:
+                        props[col] = props[col].astype(np.int16)
+                    elif mn > np.iinfo(np.int32).min and mx < np.iinfo(np.int32).max:
+                        props[col] = props[col].astype(np.int32)
+                    elif mn > np.iinfo(np.int64).min and mx < np.iinfo(np.int64).max:
+                        props[col] = props[col].astype(np.int64)    
+            
+            # Make float datatypes 32 bit
+            else:
+                props[col] = props[col].astype(np.float32)
+            
+            # Print new column type
+            #print("dtype after: ",props[col].dtype)
+            #print("******************************")
+    
+    # Print final result
+    #print("___MEMORY USAGE AFTER COMPLETION:___")
+    mem_usg = props.memory_usage().sum() / 1024**2 
+   #print("Memory usage is: ",mem_usg," MB")
+    #print("This is ",100*mem_usg/start_mem_usg,"% of the initial size")
+    return props, NAlist
+
+#Generator作成
+def train_Generator():
+    global train_columns
+    purchase_df = pd.read_csv("Desktop/AIQuest/purchase_record.csv")
+    user_df = pd.read_csv("Desktop/AIQuest/user_info.csv")
+    print(purchase_df.isnull().sum())
+    #read_csv.fillna(0,inplace = True)
+    train_df = pd.merge(purchase_df, user_df, how='left', on='user_id')
+    train_columns = train_df.columns
+    train_df = train_df.to_numpy()
+    x = len(train_df)//50
+    output = []
+    for b in train_df:
+        output.append(b)
+        if len(output) == x:
+            yield pd.DataFrame(output)
+            #yield np.array(output)
+            output = []
+
+def test_Generator():
+    global test_columns
+    test_df = pd.read_csv("Desktop/AIQuest/purchase_record_test.csv")
+    user_df = pd.read_csv("Desktop/AIQuest/user_info.csv")
+    #test_df.fillna(0,inplace = True)
+    test_df = pd.merge(test_df, user_df, how='left', on='user_id')
+    test_columns = test_df.columns
+    test_df = test_df.to_numpy()
+    x = len(test_df)//10
+    output = []
+    for b in test_df:
+        output.append(b)
+        if len(output) == x:
+            yield pd.DataFrame(output)
+            output = []
+            
+#カラム数の調整
+def fill_missing_columns(df_a, df_b):
+    columns_for_b = set(df_a.columns) - set(df_b.columns)
+    for column in columns_for_b:
+        df_b[column] = 0
+    columns_for_a = set(df_b.columns) - set(df_a.columns)
+    for column in columns_for_a:
+        df_a[column] = 0
+            
+# 学習データを読み込み 
+train_gen = train_Generator()
+test_gen = test_Generator()
+logreg = LogisticRegression()
+Tmptest_df = pd.read_csv("Desktop/AIQuest/purchase_record_test.csv")
+Tmpuser_df = pd.read_csv("Desktop/AIQuest/user_info.csv")
+print(Tmptest_df.isnull().sum())
+#Tmptest_df.fillna(0,inplace = True)
+Tmptest_df = pd.merge(Tmptest_df, Tmpuser_df, how='left', on='user_id')
+sample_test_df = Tmptest_df.sample(n=len(Tmptest_df)//50)
+Tmptest_df = sample_test_df
+Tmptest_df, NAlist = reduce_mem_usage(Tmptest_df)
+Tmptest = pd.get_dummies(Tmptest_df,drop_first=True,dummy_na=True)
+print(Tmptest.shape)
+for i in range(50):
+    train_df = next(train_gen)
+    train_df.columns = train_columns
+    train_df, NAlist = reduce_mem_usage(train_df)
+    #print("_________________")
+    #print("")
+    #print("Warning: the following columns have missing values filled with 'df['column_name'].min() -1': ")
+    #print("_________________")
+    #print("")
+    #print(NAlist)
+    print("read Ok")
+    train = pd.get_dummies(train_df,drop_first=True,dummy_na=True)
+    train = train.drop('purchase',axis = 1)
+    print(train.shape)
+    #print("Fill Now ")
+    #fill_missing_columns(train,Tmptest)
+    #print(train.shape)
+    
+    X = train
+    y = train_df.purchase
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3,random_state=42)
+    #logreg.fit(X_train, y_train.to_numpy().astype(np.float))
+    logreg.fit(X_train, y_train)
+    Adjust = train
+    print(logreg.score(X_test, y_test))
+    
+    
+print("Learning Complete")
+for a in range(10):
+    test_df = next(test_gen)
+    #test_df = pd.DataFrame(test_df)
+    test_df.columns = test_columns
+    test_df, NAlist = reduce_mem_usage(test_df)
+    test = pd.get_dummies(test_df,drop_first=True,dummy_na=True)
+    #fill_missing_columns(train,test)
+    #print(Adjust.shape)
+    print(test.shape)
+    proba = logreg.predict_proba(test)[:, 1]
+    sample_test_df['purchase_id'].extend(test['purchase_id'])
+    sample_test_df['Probablity'].extend(proba)
+    print("Complete")
+
+# 提出料
+submit_df = sample_test_df[['purchase_id', 'probability']]
+submit_df.to_csv('Desktop/AIQuest/submit_191125.csv', header=False, index=False, )
