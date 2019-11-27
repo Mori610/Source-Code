@@ -3,11 +3,14 @@ import numpy as np
 import warnings
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
+import lightgbm as lgb
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import accuracy_score
+from sklearn.preprocessing import LabelEncoder
 warnings.simplefilter('ignore')
 train_columns = None
 test_columns  = None
 
-# Kaggleの処理時間削減のためのオープンソースコード
 def reduce_mem_usage(props):
     start_mem_usg = props.memory_usage().sum() / 1024**2 
     #print("Memory usage of properties dataframe is :",start_mem_usg," MB")
@@ -77,37 +80,47 @@ def reduce_mem_usage(props):
 #Generator作成
 def train_Generator():
     global train_columns
-    purchase_df = pd.read_csv("Desktop/AIQuest/purchase_record.csv")
-    user_df = pd.read_csv("Desktop/AIQuest/user_info.csv")
-    print(purchase_df.isnull().sum())
-    #read_csv.fillna(0,inplace = True)
+    purchase_df = pd.read_csv("AIQuest/purchase_record.csv")
+    user_df = pd.read_csv("AIQuest/user_info.csv")
+    purchase_df.fillna(0,inplace = True)
+    user_df.fillna(0,inplace = True)
     train_df = pd.merge(purchase_df, user_df, how='left', on='user_id')
+    train_df, NAlist = reduce_mem_usage(train_df)
     train_columns = train_df.columns
     train_df = train_df.to_numpy()
-    x = len(train_df)//50
+    x = len(train_df)//500
     output = []
-    for b in train_df:
+    for idx, b in enumerate(train_df):
         output.append(b)
+        a = len(train_df)-idx
         if len(output) == x:
             yield pd.DataFrame(output)
-            #yield np.array(output)
             output = []
+        elif a == (x*500- len(train_df)-1):
+            yield pd.DataFrame(output)
+            output =[]
 
 def test_Generator():
     global test_columns
-    test_df = pd.read_csv("Desktop/AIQuest/purchase_record_test.csv")
-    user_df = pd.read_csv("Desktop/AIQuest/user_info.csv")
-    #test_df.fillna(0,inplace = True)
+    test_df = pd.read_csv("AIQuest/purchase_record_test.csv")
+    user_df = pd.read_csv("AIQuest/user_info.csv")
+    test_df.fillna(0,inplace = True)
+    user_df.fillna(0,inplace = True)
     test_df = pd.merge(test_df, user_df, how='left', on='user_id')
+    test_df, NAlist = reduce_mem_usage(test_df)
     test_columns = test_df.columns
     test_df = test_df.to_numpy()
-    x = len(test_df)//10
+    x = len(test_df)//60
     output = []
-    for b in test_df:
+    for idx, b in enumerate(test_df):
         output.append(b)
+        a = len(test_df)-idx
         if len(output) == x:
             yield pd.DataFrame(output)
             output = []
+        elif a == (x*500- len(test_df)-1):
+            yield pd.DataFrame(output)
+            output =[]
             
 #カラム数の調整
 def fill_missing_columns(df_a, df_b):
@@ -117,56 +130,41 @@ def fill_missing_columns(df_a, df_b):
     columns_for_a = set(df_b.columns) - set(df_a.columns)
     for column in columns_for_a:
         df_a[column] = 0
-            
+
+        
 # 学習データを読み込み 
-train_gen = train_Generator()
+#train_gen = train_Generator()
 test_gen = test_Generator()
 logreg = LogisticRegression()
-Tmptest_df = pd.read_csv("Desktop/AIQuest/purchase_record_test.csv")
-Tmpuser_df = pd.read_csv("Desktop/AIQuest/user_info.csv")
-print(Tmptest_df.isnull().sum())
-#Tmptest_df.fillna(0,inplace = True)
-Tmptest_df = pd.merge(Tmptest_df, Tmpuser_df, how='left', on='user_id')
-sample_test_df = Tmptest_df.sample(n=len(Tmptest_df)//50)
-Tmptest_df = sample_test_df
-Tmptest_df, NAlist = reduce_mem_usage(Tmptest_df)
-Tmptest = pd.get_dummies(Tmptest_df,drop_first=True,dummy_na=True)
-print(Tmptest.shape)
-
-# 学習データを分割
-for i in range(50):
-    # データ読み込み
-    train_df = next(train_gen)
+for idx ,i in enumerate(train_Generator()):
+    #train_df = next(train_gen)
+    train_df = i
     train_df.columns = train_columns
-    train_df, NAlist = reduce_mem_usage(train_df)
-    
-    # ダミー変数化
-    train = pd.get_dummies(train_df,drop_first=True,dummy_na=True)
+    print(train_df.shape)
+    train_df = train_df.drop('purchase_id',axis=1)
+    train = pd.get_dummies(train_df,drop_first=True)
     train = train.drop('purchase',axis = 1)
-    print(train.shape)
-    
-    #ロジスティック回帰
+    #print(train.dtypes)  
     X = train
     y = train_df.purchase
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3,random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33,random_state = 0)
     logreg.fit(X_train, y_train)
-    print(logreg.score(X_test, y_test))
-    
+    print(logreg.score(X_test,y_test))
+    print("Learning End"+ str(idx))
     
 print("Learning Complete")
-# テストデータも分割して評価
-for a in range(10):
-    test_df = next(test_gen)
+sample_test_df = {'purchase_id':0,'Probability':0}
+for idx,a in enumerate(test_gen):
+    test_df = a
+    #test_df = next(test_gen)
     test_df.columns = test_columns
-    test_df, NAlist = reduce_mem_usage(test_df)
-    test = pd.get_dummies(test_df,drop_first=True,dummy_na=True)
-   
-   #購入確率をここで挿入
-   proba = logreg.predict_proba(test)[:, 1]
-    sample_test_df['purchase_id'].extend(test['purchase_id'])
-    sample_test_df['Probablity'].extend(proba)
+    test = pd.get_dummies(test_df,drop_first=True)
+    columns_for_b = set(test.columns) - set(train.columns)
+    proba = logreg.predict_proba(test)[:, 1]
+    sample_test_df['purchase_id'].extend(test_df['purchase_id'])
+    sample_test_df['Probability'].extend(proba)
     print("Complete")
 
 # 提出
 submit_df = sample_test_df[['purchase_id', 'probability']]
-submit_df.to_csv('Desktop/AIQuest/submit_191125.csv', header=False, index=False, )
+submit_df.to_csv('AIQuest/submit_191125.csv', header=False, index=False, )
